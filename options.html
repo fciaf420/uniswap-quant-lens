@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Uniswap Quant Lens — Options</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <main class="uql-opt">
+    <h1>Uniswap Quant Lens</h1>
+    <p class="sub">Configure alerts and defaults. Nothing here signs transactions or touches your keys. Rabby signs everything.</p>
+
+    <form id="uql-form" autocomplete="off">
+      <div class="field">
+        <label class="label" for="webhookUrl">Discord webhook URL (remote alerts)</label>
+        <input id="webhookUrl" type="password" placeholder="https://discord.com/api/webhooks/..." spellcheck="false" autocomplete="off">
+        <span class="hint">Channel → ⚙ Edit Channel → Integrations → Webhooks → New Webhook → Copy URL. The Discord mobile app pushes these to your phone.</span>
+      </div>
+
+      <div class="field">
+        <label class="label" for="uqlWidthPct">Default range width W (%)</label>
+        <input id="uqlWidthPct" type="number" min="0.1" step="0.1" value="20">
+        <span class="hint">Used for edge / breakeven math. Default 20.</span>
+      </div>
+
+      <div class="field">
+        <label class="checkline" for="radarAlerts">
+          <input id="radarAlerts" type="checkbox">
+          Ping Discord when GMGN radar reports a 🔥 FULL signal
+        </label>
+        <span class="hint">Fires while Chrome is open and a gmgn.ai tab is discovering. 2h cooldown per token. Requires the webhook above.</span>
+      </div>
+
+      <div class="actions">
+        <button id="saveBtn" type="submit">Save</button>
+        <button id="testWebhook" type="button" class="secondary">Send test alert</button>
+        <span id="toast" class="toast" role="status" aria-live="polite"></span>
+      </div>
+    </form>
+
+    <hr class="sep">
+
+    <section class="pinned">
+      <h2>Pinned positions</h2>
+      <p class="sub">Add a position by token address. The background worker resolves the highest-TVL Uniswap pool and snapshots entry price + entry fee-rate. It then checks every minute: out-of-range, TP/SL, and fee-decay — alerting to Discord + desktop.</p>
+
+      <div class="addrow">
+        <input id="p-label" type="text" placeholder="Label (optional)">
+        <input id="p-token" type="text" placeholder="Token address (0x...)" spellcheck="false">
+        <input id="p-min" type="number" step="any" placeholder="Min price (opt)">
+        <input id="p-max" type="number" step="any" placeholder="Max price (opt)">
+        <button id="p-add" type="button">Add</button>
+      </div>
+      <span id="p-status" class="hint"></span>
+
+      <table id="p-table" class="ptable">
+        <thead>
+          <tr><th>Label</th><th>Pool</th><th>Entry</th><th>Min</th><th>Max</th><th>Fee/day</th><th></th></tr>
+        </thead>
+        <tbody id="p-body"></tbody>
+      </table>
+    </section>
+
+    <p class="disclaimer">Lens + warnings only. No custody, no auto-signing. Robinhood-chain memecoins are rug-grade — the model prices volatility, not rugs. Size for total loss.</p>
+  </main>
+  <script src="options.js"></script>
+</body>
+</html>

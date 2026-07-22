@@ -1,0 +1,48 @@
+{
+  "manifest_version": 3,
+  "name": "Uniswap Quant Lens",
+  "version": "0.1.0",
+  "description": "Lens + warnings for LPing on Uniswap (Robinhood Chain) with GMGN discovery. Reads GeckoTerminal; surfaces edge/σ/fee-rate/path. No custody, no signing — Rabby signs.",
+  "permissions": [
+    "storage",
+    "notifications",
+    "alarms"
+  ],
+  "host_permissions": [
+    "https://api.geckoterminal.com/*",
+    "https://discord.com/api/webhooks/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://gmgn.ai/*"
+      ],
+      "js": [
+        "content-gmgn.js"
+      ],
+      "css": [
+        "content-gmgn.css"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://app.uniswap.org/*"
+      ],
+      "js": [
+        "content-uniswap.js"
+      ],
+      "css": [
+        "content-uniswap.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "options_page": "options.html",
+  "icons": {
+    "128": "icon128.png"
+  }
+}

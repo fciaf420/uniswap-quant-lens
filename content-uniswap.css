@@ -1,0 +1,215 @@
+/* Uniswap Quant Lens — content-uniswap.css (Agent B)
+ * Fixed dark HUD on app.uniswap.org. All selectors prefixed .uql- / #uql-.
+ * No global resets; z-index stays under Uniswap's own modals/wallet sheet.
+ */
+
+/* ---- HUD card ---------------------------------------------------------- */
+#uql-hud.uql-card {
+  box-sizing: border-box;
+  position: fixed;
+  top: 84px;
+  right: 16px;
+  width: 288px;
+  max-height: calc(100vh - 110px);
+  overflow-y: auto;
+  z-index: 2147482000;
+  background: #16161f;
+  border: 1px solid #2a2a3a;
+  border-radius: 10px;
+  padding: 11px 13px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #d7d7e0;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  box-shadow: 0 6px 26px rgba(0, 0, 0, 0.5);
+}
+#uql-hud * { box-sizing: border-box; }
+
+/* ---- header ------------------------------------------------------------ */
+#uql-hud .uql-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #23232f;
+}
+#uql-hud .uql-title {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: #7c6cf0;
+}
+#uql-hud .uql-dot { font-size: 8px; color: #7c6cf0; opacity: 0.7; }
+
+/* ---- idle / pool line -------------------------------------------------- */
+#uql-hud .uql-idle {
+  font-size: 11.5px;
+  color: #9a9ab0;
+  line-height: 1.5;
+  padding: 4px 0;
+}
+#uql-hud .uql-poolline {
+  font-size: 10.5px;
+  color: #9a9ab0;
+  margin: 2px 0 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- rows -------------------------------------------------------------- */
+#uql-hud .uql-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 3px 0;
+}
+#uql-hud .uql-label { color: #8a8a99; font-size: 11px; }
+#uql-hud .uql-val { text-align: right; font-variant-numeric: tabular-nums; }
+#uql-hud .uql-sub { font-size: 10px; color: #6b6b7a; margin: 1px 0 6px; }
+
+/* ---- edge bar ---------------------------------------------------------- */
+#uql-hud .uql-barwrap {
+  width: 100%;
+  height: 5px;
+  background: #23232f;
+  border-radius: 3px;
+  overflow: hidden;
+  margin: 3px 0;
+}
+#uql-hud .uql-bar { height: 100%; border-radius: 3px; transition: width 0.3s ease; }
+
+/* ---- 2-metric grid ----------------------------------------------------- */
+#uql-hud .uql-grid2 {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+  margin: 6px 0;
+}
+#uql-hud .uql-cell {
+  background: #1c1c27;
+  border: 1px solid #23232f;
+  border-radius: 6px;
+  padding: 5px 6px;
+  text-align: center;
+}
+#uql-hud .uql-cell-l { font-size: 10px; color: #8a8a99; }
+#uql-hud .uql-cell-v { font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* ---- recipe + warning -------------------------------------------------- */
+#uql-hud .uql-recipe {
+  margin: 8px 0 4px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: #b7aefc;
+  background: #1a1a26;
+  border-left: 2px solid #7c6cf0;
+  padding: 6px 8px;
+  border-radius: 0 6px 6px 0;
+}
+#uql-hud .uql-warn-line {
+  margin: 6px 0;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #ffb063;
+  background: #2c1e14;
+  border: 1px solid #ff983855;
+  border-radius: 6px;
+  padding: 5px 8px;
+  line-height: 1.4;
+}
+
+/* ---- breakeven strip --------------------------------------------------- */
+#uql-hud .uql-be {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #23232f;
+}
+#uql-hud .uql-be-head { margin-bottom: 5px; }
+#uql-hud .uql-be-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: #8a8a9a;
+}
+#uql-hud .uql-be-ctrl {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 5px;
+}
+#uql-hud .uql-be-pm { font-size: 11px; color: #9a9ab0; }
+#uql-hud .uql-be-input {
+  width: 62px;
+  background: #1c1c27;
+  border: 1px solid #2a2a3a;
+  border-radius: 6px;
+  color: #e8e8f4;
+  font-size: 12px;
+  padding: 4px 7px;
+  font-variant-numeric: tabular-nums;
+  font-family: inherit;
+}
+#uql-hud .uql-be-input:focus { outline: none; border-color: #7c6cf0; }
+#uql-hud .uql-be-res {
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.4;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: #1c1c27;
+  border: 1px solid #23232f;
+}
+
+/* ---- footer ------------------------------------------------------------ */
+#uql-hud .uql-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid #23232f;
+}
+#uql-hud .uql-age { font-size: 10px; color: #6b6b7a; }
+#uql-hud .uql-refresh {
+  background: #23232f;
+  border: 1px solid #2a2a3a;
+  color: #b8b8c4;
+  border-radius: 6px;
+  font-size: 11px;
+  padding: 2px 8px;
+  cursor: pointer;
+  line-height: 1.2;
+  font-family: inherit;
+}
+#uql-hud .uql-refresh:hover { background: #2a2a3a; color: #fff; }
+
+/* ---- color helpers ----------------------------------------------------- */
+.uql-good    { color: #46d17f; }
+.uql-warn    { color: #f0c14b; }
+.uql-bad     { color: #ff5f6a; }
+.uql-neutral { color: #d7d7e0; }
+.uql-muted   { color: #8a8a99; }
+#uql-hud .uql-bar.uql-good    { background: #46d17f; }
+#uql-hud .uql-bar.uql-warn    { background: #f0c14b; }
+#uql-hud .uql-bar.uql-bad     { background: #ff5f6a; }
+#uql-hud .uql-bar.uql-neutral { background: #7c6cf0; }
+
+/* ---- hover tooltip ----------------------------------------------------- */
+[data-uql-tip] { cursor: help; border-bottom: 1px dotted #5a5a72; }
+#uql-tooltip {
+  display: none;
+  position: fixed;
+  z-index: 2147483000;
+  max-width: 320px;
+  background: #1c1c28;
+  border: 1px solid #7c6cf0;
+  border-radius: 8px;
+  padding: 9px 11px;
+  color: #d6d6e4;
+  font-size: 11.5px;
+  line-height: 1.5;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
