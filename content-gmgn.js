@@ -545,15 +545,19 @@
 
   function makeHouseChip(sig) {
     var row = sig.row, hs = sig.hs;
+    var tier = hs.pool && hs.pool.feeTierPct != null ? hs.pool.feeTierPct + "%" : "?";
     var chip = el("button", "uql-chip uql-chip-house");
-    chip.textContent = "🎯 " + row.symbol + " · " + hs.type;
+    chip.textContent = "🎯 " + row.symbol + " · " + hs.type + " · " + tier;
     chip.title = "HOUSE RULE MET — " + hs.type + ": " + hs.why +
-      "\nGO LP: opens the " + (hs.pool && hs.pool.feeTierPct != null ? hs.pool.feeTierPct + "%" : "target") + " pool on Uniswap (address copied too)." +
-      (hs.type === "DIP-SET" ? "\nPlaybook: set at the bottom — often 30-50% here." : "\nPlaybook: new pairs only on the top-tier pool with vol5m ≥ $300K.");
+      "\nGO LP: opens the token's Uniswap page — pick the " + tier + " pool in its Pools list (address copied too)." +
+      (hs.type === "DIP-SET" ? "\nPlaybook: set at the bottom — often 30-50% here." : "\nPlaybook: new pairs only on the top-tier pool with vol5m ≥ $300K.") +
+      "\n(Token page used because Uniswap's own site lags indexing brand-new v4 pool IDs — direct pool links 404 on fresh launches.)";
     chip.addEventListener("click", safe(function () {
       copyAndToast(row.address);
-      var pa = hs.pool && hs.pool.address ? hs.pool.address : null;
-      try { window.open(uniswapDeepLink(row.address, pa), "_blank", "noopener"); } catch (e) {}
+      // Token explore page: always resolvable, lists every pool with APR — the
+      // pool-ID deep link 404s on fresh v4 pools (live case: MARSCOIN, 20 spam
+      // tiers, Uniswap indexer lag).
+      try { window.open("https://app.uniswap.org/explore/tokens/robinhood/" + encodeURIComponent(row.address), "_blank", "noopener"); } catch (e) {}
     }));
     return chip;
   }
