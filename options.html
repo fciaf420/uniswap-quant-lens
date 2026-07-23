@@ -13,6 +13,8 @@
 
     <form id="uql-form" autocomplete="off">
       <div class="field">
+        <label class="label" for="gmgnApiKey">GMGN API key (official openapi.gmgn.ai — primary radar feed)</label>
+        <input id="gmgnApiKey" type="password" placeholder="gmgn_..." spellcheck="false" autocomplete="off">
         <label class="label" for="webhookUrl">Discord webhook URL (remote alerts)</label>
         <input id="webhookUrl" type="password" placeholder="https://discord.com/api/webhooks/..." spellcheck="false" autocomplete="off">
         <span class="hint">Channel → ⚙ Edit Channel → Integrations → Webhooks → New Webhook → Copy URL. The Discord mobile app pushes these to your phone.</span>

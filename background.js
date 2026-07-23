@@ -151,6 +151,8 @@ function poolFromGT(el) {
       : parseFeeTier(name),
     tvl: num(a.reserve_in_usd, 0),
     vol24: num(pick(a, 'volume_usd.h24'), 0),
+    vol5m: num(pick(a, 'volume_usd.m5'), 0),
+    createdAt: a.pool_created_at || null,
     priceUsd: num(a.base_token_price_usd, 0),
     isUniswap: /uniswap/i.test(dexId)
   };
@@ -347,6 +349,42 @@ function nullMetrics(reason) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// GMGN official API (openapi.gmgn.ai) — primary rank feed. Key lives in
+// chrome.storage.sync (options), NEVER in code. Read endpoints need only
+// X-APIKEY + timestamp/client_id query params (±5s validity, fresh UUID).
+// ---------------------------------------------------------------------------
+async function gmgnRank(interval) {
+  const st = await new Promise((res) => chrome.storage.sync.get({ gmgnApiKey: '' }, res));
+  const key = (st.gmgnApiKey || '').trim();
+  if (!key) return { ok: false, error: 'no GMGN API key set in options' };
+  const qs = new URLSearchParams({
+    chain: 'robinhood', interval: interval || '1h', limit: '100',
+    timestamp: String(Math.floor(Date.now() / 1000)),
+    client_id: crypto.randomUUID()
+  });
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 8000);
+    const r = await fetch('https://openapi.gmgn.ai/v1/market/rank?' + qs, {
+      headers: { 'X-APIKEY': key }, signal: ctrl.signal
+    });
+    clearTimeout(t);
+    if (!r.ok) return { ok: false, error: 'HTTP ' + r.status };
+    const j = await r.json();
+    // response is double-nested: {code,data:{code,data:{rank:[...]}}}
+    let d = j;
+    for (let i = 0; i < 3 && d; i++) {
+      if (Array.isArray(d.rank)) return { ok: true, rows: d.rank };
+      d = d.data;
+    }
+    if (d && Array.isArray(d.rank)) return { ok: true, rows: d.rank };
+    return { ok: false, error: 'unexpected shape (code ' + (j && j.code) + ')' };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e).slice(0, 120) };
+  }
+}
+
 async function getTokenMetrics(tokenAddress) {
   if (!tokenAddress) return nullMetrics('missing token address');
   const settings = await getSettings();
@@ -391,8 +429,17 @@ async function getTokenMetrics(tokenAddress) {
       name: pool.name,
       feeTierPct,
       tvl: pool.tvl,
-      vol24: pool.vol24
+      vol24: pool.vol24,
+      vol5m: pool.vol5m || 0,
+      createdAt: pool.createdAt || null
     },
+    // HOUSE pool: the highest-fee-tier Uniswap pool for this token (tie -> TVL).
+    // User house rule targets the top-tier pool for new pairs; on robinhood the top
+    // standard tier is 1% today, but this picks 5%+ automatically if they appear.
+    housePool: (tp.ok && tp.uni.length) ? (function () {
+      const byTier = tp.uni.slice().sort((x, y) => (num(y.feeTierPct) - num(x.feeTierPct)) || (y.tvl - x.tvl))[0];
+      return byTier ? { address: byTier.address, feeTierPct: byTier.feeTierPct, tvl: byTier.tvl, vol5m: byTier.vol5m || 0 } : null;
+    })() : { address: pool.address, feeTierPct, tvl: pool.tvl, vol5m: pool.vol5m || 0 },
     feeRate,
     feeRateRun: sig.feeRateRun,       // finer run-rate (extra, not required by contract)
     sigma,
@@ -644,6 +691,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return false;
   }
 
+  if (msg.type === 'getRank') {
+    (async () => {
+      try { sendResponse(await gmgnRank(msg.interval)); }
+      catch (e) { sendResponse({ ok: false, error: String(e).slice(0, 120) }); }
+    })();
+    return true;
+  }
   if (msg.type === 'getTokenMetrics') {
     (async () => {
       try { sendResponse(await getTokenMetrics(msg.tokenAddress)); }

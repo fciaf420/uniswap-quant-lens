@@ -137,12 +137,51 @@
       isWash: truthy(pick(r, ["is_wash_trading", "wash_trading", "is_wash"])),
       top10: num(pick(r, ["top_10_holder_rate", "top10_holder_rate", "top_10_holders_rate"])),
       openTs: num(pick(r, ["open_timestamp", "openTimestamp", "created_timestamp"])),
+      mcap: num(pick(r, ["market_cap", "mcap", "marketCap"])),
+      launchpad: String(pick(r, ["launchpad"]) || "") + " " + String(pick(r, ["launchpad_platform"]) || ""),
     };
   }
+
+  // Primary feed (2026-07-22+): GMGN rotates rank API paths between app versions,
+  // so interceptor.js (MAIN world) forwards whatever rank JSON the page itself
+  // receives. Works regardless of endpoint/method/version.
+  function ingestRows(arr, srcUrl) {
+    var rows = [];
+    for (var i = 0; i < arr.length; i++) {
+      var nrm = normalizeRow(arr[i]);
+      if (nrm) rows.push(nrm);
+    }
+    if (!rows.length) return;
+    state.rows = rows;
+    state.lastRankTs = Date.now();
+    log("rank via " + (srcUrl ? srcUrl.split("?")[0] : "direct") + ": " + rows.length + " rows");
+    onRankUpdated();
+  }
+
+  document.addEventListener("uql-rank-data", safe(function (ev) {
+    if (!state.active) return;
+    var payload = null;
+    try { payload = JSON.parse(ev.detail); } catch (e) { return; }
+    if (payload && Array.isArray(payload.rows)) ingestRows(payload.rows, payload.url);
+  }));
 
   var fetchRank = safe(function fetchRank() {
     if (!state.active || state.fetching) return;
     if (document.visibilityState !== "visible") return;
+    state.fetching = true;
+    // PRIMARY: official GMGN API via background (user's key, openapi.gmgn.ai).
+    sendMessage({ type: "getRank", interval: "1h" }).then(safe(function (resp) {
+      state.fetching = false;
+      if (resp && resp.ok && Array.isArray(resp.rows)) { ingestRows(resp.rows, "openapi"); return; }
+      log("official rank failed: " + (resp && resp.error) + " — falling back to page feed");
+      legacyFetchRank();
+    })).catch(safe(function () { state.fetching = false; legacyFetchRank(); }));
+  });
+
+  // FALLBACK: the site's internal endpoint (breaks when GMGN rotates app versions;
+  // interceptor.js + this stay as backup only).
+  var legacyFetchRank = safe(function legacyFetchRank() {
+    if (state.lastRankTs && Date.now() - state.lastRankTs < 120000) return;
     state.fetching = true;
     fetch(RANK_URL, { credentials: "include", headers: { "accept": "application/json" } })
       .then(function (res) { return res.ok ? res.json() : Promise.reject(new Error("HTTP " + res.status)); })
@@ -155,14 +194,7 @@
         else if (json && json.data && Array.isArray(json.data)) arr = json.data;
         else if (Array.isArray(json)) arr = json;
         if (!arr) { log("no rank array", json && json.code); return; }
-        var rows = [];
-        for (var i = 0; i < arr.length; i++) {
-          var nrm = normalizeRow(arr[i]);
-          if (nrm) rows.push(nrm);
-        }
-        state.rows = rows;
-        state.lastRankTs = Date.now();
-        onRankUpdated();
+        ingestRows(arr, RANK_URL);
       }))
       .catch(safe(function (e) { state.fetching = false; log("rank fetch failed", e && e.message); }));
   });
@@ -191,7 +223,64 @@
     if (row.isWash) f.push("wash-trading");
     if (row.rugRatio != null && row.rugRatio > GATE_RUG_MAX) f.push("rug " + fmtNum(row.rugRatio, 2));
     if (row.top10 != null && row.top10 > GATE_TOP10_MAX) f.push("top10 " + Math.round(row.top10 * 100) + "%");
+    // HOUSE RULE: never touch flap.fun launchpad tokens (user rule, hard block).
+    if (/flap/i.test(row.launchpad || "")) f.push("flap.fun");
     return f;
+  }
+
+  // =====================================================================
+  // HOUSE RULES (user playbook, 2026-07-22 — priors from live trading):
+  //  1. NEW PAIRS (<24h): only play top-tier fee pools (>=1% — the Uniswap
+  //     equivalent of "base fee 5%" on DLMM) AND 5-min vol >= $300k.
+  //  2. DIP-SET: mcap <= $2M and >=50% off the high — the bottom-set spot
+  //     ("often get 30-50% here"). Surfaced as 🎯 chips, still safety-gated.
+  // =====================================================================
+  var HOUSE_NEWPAIR_AGE_H = 24;
+  var HOUSE_NEWPAIR_MIN_TIER = 1.0;   // feeTierPct
+  var HOUSE_NEWPAIR_MIN_VOL5M = 300000; // USD per 5 min
+  var HOUSE_DIP_MAX_MCAP = 2e6;
+  var HOUSE_DIP_MIN_DD = 50;          // % from high
+
+  function tokenAgeH(row) {
+    if (!row.openTs) return null;
+    return (Date.now() / 1000 - row.openTs) / 3600;
+  }
+
+  // Returns null if OK, or a short reason string when the new-pair rule blocks.
+  function newPairViolation(row, m) {
+    var age = tokenAgeH(row);
+    if (age == null || age >= HOUSE_NEWPAIR_AGE_H) return null; // not a new pair
+    var hp = m && (m.housePool || m.pool);
+    if (!hp) return null;
+    var tier = num(hp.feeTierPct), v5 = num(hp.vol5m);
+    if (tier < HOUSE_NEWPAIR_MIN_TIER) return "new<24h: tier " + tier + "% < " + HOUSE_NEWPAIR_MIN_TIER + "%";
+    if (v5 < HOUSE_NEWPAIR_MIN_VOL5M) return "new<24h: vol5m $" + fmtCompact(v5) + " < $300K";
+    return null;
+  }
+
+  // House GO signal: user's playbook conditions fully met -> 🎯 chip saying go LP.
+  // Two flavors: NEW-PAIR (fresh token, top-tier pool, 5-min vol hot) and
+  // DIP-SET (<=2M mcap, >=50% off high -> set at the bottom).
+  function houseSignal(row, m) {
+    if (!m || !m.ok) return null;
+    var hp = m.housePool || m.pool;
+    var age = tokenAgeH(row);
+    if (age != null && age < HOUSE_NEWPAIR_AGE_H && hp &&
+        num(hp.feeTierPct) >= HOUSE_NEWPAIR_MIN_TIER && num(hp.vol5m) >= HOUSE_NEWPAIR_MIN_VOL5M) {
+      return { type: "NEW-PAIR", pool: hp,
+        why: "fresh pair " + fmtNum(age, 1) + "h · top tier " + hp.feeTierPct + "% · vol5m $" + fmtCompact(hp.vol5m) };
+    }
+    if (isDipSet(row, m)) {
+      return { type: "DIP-SET", pool: m.pool,
+        why: "mcap $" + fmtCompact(row.mcap) + " · ▼" + fmtNum(num(m.ddHigh), 0) + "% from high — bottom-set zone" };
+    }
+    return null;
+  }
+
+  function isDipSet(row, m) {
+    if (!m || m.ddHigh == null) return false;
+    if (!(row.mcap > 0 && row.mcap <= HOUSE_DIP_MAX_MCAP)) return false;
+    return num(m.ddHigh) >= HOUSE_DIP_MIN_DD;
   }
 
   // ========================================================================
@@ -235,9 +324,11 @@
     var m = slot && slot.data ? slot.data : null;
     var edge = m ? num(m.edge) : null;
     if (fails.length) {
-      return { kind: "NONE", edge: edge, blocked: true, fails: fails, m: m };
+      return { kind: "NONE", edge: edge, blocked: true, fails: fails, m: m, dip: false };
     }
-    if (edge == null) return { kind: "NONE", edge: null, blocked: false, fails: [], m: m };
+    var np = newPairViolation(row, m);
+    var dip = isDipSet(row, m);
+    if (edge == null) return { kind: "NONE", edge: null, blocked: false, fails: [], m: m, dip: dip, np: np };
 
     // accel-equivalent: price_change_5m>0 AND volume rising
     var prev = state.prevVol[lc(row.address)];
@@ -245,18 +336,19 @@
     var accelOk = (row.pc5m != null && row.pc5m > 0) && volRising;
     var pathOk = m.path !== "FREEFALL";
 
-    if (edge >= 1 && accelOk && pathOk && flowClean(row)) {
-      return { kind: "FULL", edge: edge, blocked: false, fails: [], m: m, accelOk: accelOk };
+    if (edge >= 1 && accelOk && pathOk && flowClean(row) && !np) {
+      return { kind: "FULL", edge: edge, blocked: false, fails: [], m: m, accelOk: accelOk, dip: dip };
     }
-    if (edge >= 0.5) {
+    if (edge >= 0.5 || dip) {
       var miss = [];
       if (edge < 1) miss.push("edge<1");
       if (!accelOk) miss.push("accel");
       if (!pathOk) miss.push("path");
       if (!flowClean(row)) miss.push("flow");
-      return { kind: "NEAR", edge: edge, blocked: false, fails: miss, m: m };
+      if (np) miss.push(np);
+      return { kind: "NEAR", edge: edge, blocked: false, fails: miss, m: m, dip: dip, np: np };
     }
-    return { kind: "NONE", edge: edge, blocked: false, fails: [], m: m };
+    return { kind: "NONE", edge: edge, blocked: false, fails: [], m: m, dip: dip, np: np };
   }
 
   function edgeColorClass(edge) {
@@ -304,7 +396,9 @@
     }
     var edge = num(m.edge);
     pill.className = "uql-pill " + edgeColorClass(edge);
+    var hsPill = cls.blocked ? null : houseSignal(row, cls.m);
     var mark = cls.kind === "FULL" ? "🔥 " : (cls.kind === "NEAR" ? "⚠ " : "");
+    if (hsPill) mark = "🎯 " + mark;
     pill.textContent = mark + "E " + fmtNum(edge, 2);
     var fs = flowScore(row);
     var poolNm = m.pool && m.pool.name ? m.pool.name : "—";
@@ -316,6 +410,7 @@
       "FlowScore " + fmtNum(fs, 1) + " (smart " + row.smartDegen + " / renowned " + row.renowned +
         " / sniper " + row.sniperCount + ")\n" +
       "pool " + poolNm + "  ·  TVL $" + fmtCompact(m.pool && m.pool.tvl) + "  vol24 $" + fmtCompact(m.pool && m.pool.vol24) +
+      (hsPill ? "\n🎯 HOUSE " + hsPill.type + ": " + hsPill.why + " — GO LP the " + (hsPill.pool && hsPill.pool.feeTierPct != null ? hsPill.pool.feeTierPct + "%" : "target") + " pool" : "") +
       "\n\u21b1 click to open this pool on Uniswap (address copied too)";
     // Clickable: any scored pill jumps straight to the pool's Uniswap page.
     var poolAddr = m.pool && m.pool.address ? m.pool.address : null;
@@ -367,15 +462,33 @@
   var radarCollapsed = false;
 
   function currentSignals() {
-    var full = [], near = [];
+    var full = [], near = [], house = [];
     topRows().forEach(function (row) {
       var cls = classify(row);
+      var hs = cls.blocked ? null : houseSignal(row, cls.m);
+      if (hs) house.push({ row: row, cls: cls, hs: hs });
       if (cls.kind === "FULL") full.push({ row: row, cls: cls });
       else if (cls.kind === "NEAR") near.push({ row: row, cls: cls });
     });
     full.sort(function (a, b) { return (b.cls.edge || 0) - (a.cls.edge || 0); });
     near.sort(function (a, b) { return (b.cls.edge || 0) - (a.cls.edge || 0); });
-    return { full: full, near: near };
+    house.sort(function (a, b) { return (b.cls.edge || 0) - (a.cls.edge || 0); });
+    return { full: full, near: near, house: house };
+  }
+
+  function makeHouseChip(sig) {
+    var row = sig.row, hs = sig.hs;
+    var chip = el("button", "uql-chip uql-chip-house");
+    chip.textContent = "🎯 " + row.symbol + " · " + hs.type;
+    chip.title = "HOUSE RULE MET — " + hs.type + ": " + hs.why +
+      "\nGO LP: opens the " + (hs.pool && hs.pool.feeTierPct != null ? hs.pool.feeTierPct + "%" : "target") + " pool on Uniswap (address copied too)." +
+      (hs.type === "DIP-SET" ? "\nPlaybook: set at the bottom — often 30-50% here." : "\nPlaybook: new pairs only on the top-tier pool with vol5m ≥ $300K.");
+    chip.addEventListener("click", safe(function () {
+      copyAndToast(row.address);
+      var pa = hs.pool && hs.pool.address ? hs.pool.address : null;
+      try { window.open(uniswapDeepLink(row.address, pa), "_blank", "noopener"); } catch (e) {}
+    }));
+    return chip;
   }
 
   function uniswapDeepLink(addr, poolAddr) {
@@ -446,13 +559,14 @@
     var sigs = currentSignals();
     if (radarCollapsed) {
       bar.appendChild(el("span", "uql-radar-empty",
-        sigs.full.length + "🔥 " + sigs.near.length + "⚠"));
+        sigs.house.length + "🎯 " + sigs.full.length + "🔥 " + sigs.near.length + "⚠"));
       return;
     }
-    if (!sigs.full.length && !sigs.near.length) {
+    if (!sigs.full.length && !sigs.near.length && !sigs.house.length) {
       var msg = state.lastRankTs ? "nothing actionable on the board" : "loading radar…";
       bar.appendChild(el("span", "uql-radar-empty", msg));
     } else {
+      sigs.house.forEach(function (s) { bar.appendChild(makeHouseChip(s)); });
       sigs.full.forEach(function (s) { bar.appendChild(makeChip(s, true)); });
       sigs.near.forEach(function (s) { bar.appendChild(makeChip(s, false)); });
     }

@@ -31,11 +31,12 @@ function fmt(v, digits) {
 function loadSettings() {
   try {
     chrome.storage.sync.get(
-      { webhookUrl: '', uqlWidthPct: 20, radarAlerts: false },
+      { webhookUrl: '', uqlWidthPct: 20, radarAlerts: false, gmgnApiKey: '' },
       (items) => {
         if (chrome.runtime.lastError) return;
         const it = items || {};
         $('webhookUrl').value = it.webhookUrl || '';
+        $('gmgnApiKey').value = it.gmgnApiKey || '';
         $('uqlWidthPct').value = (it.uqlWidthPct != null) ? it.uqlWidthPct : 20;
         $('radarAlerts').checked = !!it.radarAlerts;
       }
@@ -46,11 +47,12 @@ function loadSettings() {
 function saveSettings(e) {
   if (e) e.preventDefault();
   const webhookUrl = $('webhookUrl').value.trim();
+  const gmgnApiKey = $('gmgnApiKey').value.trim();
   const radarAlerts = $('radarAlerts').checked;
   let uqlWidthPct = parseFloat($('uqlWidthPct').value);
   if (!isFinite(uqlWidthPct) || uqlWidthPct <= 0) uqlWidthPct = 20;
   try {
-    chrome.storage.sync.set({ webhookUrl, uqlWidthPct, radarAlerts }, () => {
+    chrome.storage.sync.set({ webhookUrl, uqlWidthPct, radarAlerts, gmgnApiKey }, () => {
       if (chrome.runtime.lastError) showToast('Save failed: ' + chrome.runtime.lastError.message, true);
       else showToast('Saved \u2713', false);
     });

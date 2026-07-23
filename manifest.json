@@ -10,12 +10,23 @@
   ],
   "host_permissions": [
     "https://api.geckoterminal.com/*",
+    "https://openapi.gmgn.ai/*",
     "https://discord.com/api/webhooks/*"
   ],
   "background": {
     "service_worker": "background.js"
   },
   "content_scripts": [
+    {
+      "matches": [
+        "https://gmgn.ai/*"
+      ],
+      "js": [
+        "interceptor.js"
+      ],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
     {
       "matches": [
         "https://gmgn.ai/*"

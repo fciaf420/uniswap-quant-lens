@@ -129,3 +129,7 @@
 /* clickable pill -> uniswap pool */
 .uql-pill-link { cursor: pointer; }
 .uql-pill-link:hover { filter: brightness(1.35); text-decoration: underline; }
+
+/* house-rule GO chip */
+.uql-chip-house { background: #1d2a1d !important; border: 1px solid #4caf50 !important; color: #a5d6a7 !important; font-weight: 600; }
+.uql-chip-house:hover { filter: brightness(1.3); }
