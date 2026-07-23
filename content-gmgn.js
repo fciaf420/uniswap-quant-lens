@@ -298,7 +298,9 @@
     }
     if (isDipSet(row, m)) {
       var dd = dipDD(row, m);
-      return { type: "DIP-SET", pool: m && m.ok ? m.pool : null,
+      // Target the HIGHEST-FEE-TIER pool (house playbook: always play the top-fee
+      // pool — 1% on robinhood today, auto-prefers higher tiers if they appear).
+      return { type: "DIP-SET", pool: hp || (m && m.ok ? m.pool : null),
         why: "mcap $" + fmtCompact(row.mcap) + " · ▼" + fmtNum(dd, 0) + "% from peak — bottom-set zone" };
     }
     return null;
