@@ -433,13 +433,19 @@ async function getTokenMetrics(tokenAddress) {
       vol5m: pool.vol5m || 0,
       createdAt: pool.createdAt || null
     },
-    // HOUSE pool: the highest-fee-tier Uniswap pool for this token (tie -> TVL).
-    // User house rule targets the top-tier pool for new pairs; on robinhood the top
-    // standard tier is 1% today, but this picks 5%+ automatically if they appear.
-    housePool: (tp.ok && tp.uni.length) ? (function () {
-      const byTier = tp.uni.slice().sort((x, y) => (num(y.feeTierPct) - num(x.feeTierPct)) || (y.tvl - x.tvl))[0];
-      return byTier ? { address: byTier.address, feeTierPct: byTier.feeTierPct, tvl: byTier.tvl, vol5m: byTier.vol5m || 0 } : null;
-    })() : { address: pool.address, feeTierPct, tvl: pool.tvl, vol5m: pool.vol5m || 0 },
+    // HOUSE pool: the playbook's "top-fee pool" — but sanity-banded. v4 allows
+    // arbitrary tiers and scam/anti-snipe pools exist at absurd fees (caught live:
+    // 87% tier on SWOGE). Rule: tier must be 1-10%, then pick where trading
+    // actually happens (highest vol24, tie -> TVL). No pool in band -> null ->
+    // no house signal (content gates on this).
+    housePool: (function () {
+      const cands = (tp.ok && tp.uni.length ? tp.uni : [pool])
+        .filter((p) => { const t = num(p.feeTierPct); return t >= 1 && t <= 10; });
+      if (!cands.length) return null;
+      cands.sort((x, y) => (y.vol24 - x.vol24) || (y.tvl - x.tvl));
+      const b = cands[0];
+      return { address: b.address, feeTierPct: b.feeTierPct, tvl: b.tvl, vol24: b.vol24 || 0, vol5m: b.vol5m || 0 };
+    })(),
     feeRate,
     feeRateRun: sig.feeRateRun,       // finer run-rate (extra, not required by contract)
     sigma,

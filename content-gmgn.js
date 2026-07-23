@@ -286,7 +286,9 @@
   function houseSignal(row, m) {
     var age = tokenAgeH(row);
     var v5g = state.vol5m[lc(row.address)];
-    var hp = m && m.ok ? (m.housePool || m.pool) : null;
+    var hp = m && m.ok ? m.housePool : null; // sane-tier (1-10%) pool only, null if none
+    // Metrics loaded but NO pool in the sane fee band (1-10%) -> nothing to play.
+    if (m && m.ok && !hp) return null;
     // NEW-PAIR: age + volume are board-wide facts; tier needs metrics. With
     // metrics -> full check incl. tier; without -> only if the volume bar is met
     // (chip still fires, deep-link falls back to token search).
@@ -297,12 +299,8 @@
         why: "fresh pair " + fmtNum(age, 1) + "h · " + (hp ? "top tier " + hp.feeTierPct + "%" : "tier pending") + " · vol5m $" + fmtCompact(v5) };
     }
     if (isDipSet(row, m)) {
-      // Playbook: only play the top-fee pool. If metrics are loaded and the BEST
-      // pool this token has is under 1%, there is no house trade — no signal at all
-      // (a 0.01% tier can't pay for memecoin vol; caught live on Syrax 2026-07-22).
-      if (hp && num(hp.feeTierPct) < HOUSE_NEWPAIR_MIN_TIER) return null;
       var dd = dipDD(row, m);
-      return { type: "DIP-SET", pool: hp || (m && m.ok ? m.pool : null),
+      return { type: "DIP-SET", pool: hp,
         why: "mcap $" + fmtCompact(row.mcap) + " · ▼" + fmtNum(dd, 0) + "% from peak — bottom-set zone" +
              (hp ? " · " + hp.feeTierPct + "% pool" : " · tier pending") };
     }
