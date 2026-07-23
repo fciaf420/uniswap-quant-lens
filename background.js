@@ -391,7 +391,14 @@ async function getTokenMetrics(tokenAddress) {
   const W = num(settings.uqlWidthPct, 20) || 20;
 
   const tp = await fetchTokenPools(String(tokenAddress));
-  let pool = (tp.ok && tp.uni.length) ? tp.uni[0] : null; // highest-TVL uniswap pool
+  // Main pool: prefer sane-fee-tier pools (0.01-10%) sorted by TVL; scam/anti-snipe
+  // v4 tiers (e.g. the live-caught 87%) are excluded unless literally nothing else
+  // exists — and then the HUD math will show garbage edge anyway (no volume flows).
+  let pool = null;
+  if (tp.ok && tp.uni.length) {
+    const sane = tp.uni.filter((p) => { const t = num(p.feeTierPct); return t == null || t <= 10; });
+    pool = (sane.length ? sane : tp.uni)[0];
+  }
 
   // Fallback (live-verified need): the address may be a POOL address, not a token —
   // e.g. the HUD on app.uniswap.org/explore/pools/robinhood/<pool> extracts the pool
