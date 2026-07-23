@@ -36,6 +36,7 @@
     rows: [],            // last parsed rank rows (normalized)
     metrics: {},         // addr(lower) -> { data, ts, fetching }
     prevVol: {},         // addr(lower) -> previous poll volume (for "rising")
+    vol5m: {},           // addr(lower) -> board-wide 5-minute volume (5m rank feed)
     firedFull: {},       // addr(lower) -> true (radarSignal dedupe, in-memory)
     pollTimer: null,
     obs: null,
@@ -138,6 +139,7 @@
       top10: num(pick(r, ["top_10_holder_rate", "top10_holder_rate", "top_10_holders_rate"])),
       openTs: num(pick(r, ["open_timestamp", "openTimestamp", "created_timestamp"])),
       mcap: num(pick(r, ["market_cap", "mcap", "marketCap"])),
+      histMcap: num(pick(r, ["history_highest_market_cap", "historyHighestMarketCap", "ath_market_cap"])),
       launchpad: String(pick(r, ["launchpad"]) || "") + " " + String(pick(r, ["launchpad_platform"]) || ""),
     };
   }
@@ -157,6 +159,20 @@
     log("rank via " + (srcUrl ? srcUrl.split("?")[0] : "direct") + ": " + rows.length + " rows");
     onRankUpdated();
   }
+
+  // 5m-interval rank poll: board-wide 5-minute volume per token (house rule bar).
+  var fetch5m = safe(function fetch5m() {
+    if (!state.active) return;
+    if (document.visibilityState !== "visible") return;
+    sendMessage({ type: "getRank", interval: "5m" }).then(safe(function (resp) {
+      if (!(resp && resp.ok && Array.isArray(resp.rows))) return;
+      resp.rows.forEach(function (r) {
+        var a = r && r.address ? lc(String(r.address)) : null;
+        if (a) state.vol5m[a] = num(r.volume);
+      });
+      renderRadar();
+    }));
+  });
 
   document.addEventListener("uql-rank-data", safe(function (ev) {
     if (!state.active) return;
@@ -240,6 +256,12 @@
   var HOUSE_NEWPAIR_MIN_VOL5M = 300000; // USD per 5 min
   var HOUSE_DIP_MAX_MCAP = 2e6;
   var HOUSE_DIP_MIN_DD = 50;          // % from high
+  // Liveness filters (added priors, marked pending calibration): a bottom-set only
+  // pays if the token still trades. Without these the sweep surfaced ▼95% corpses.
+  var HOUSE_DIP_MAX_DD = 85;          // deeper than this = dead/rugged, not a dip
+  var HOUSE_DIP_MIN_MCAP = 50000;     // dust floor
+  var HOUSE_DIP_MIN_VOL1H = 25000;    // $/1h — fees need flow
+  var HOUSE_CHIP_CAP = 5;             // radar shows top N house chips by volume
 
   function tokenAgeH(row) {
     if (!row.openTs) return null;
@@ -262,25 +284,56 @@
   // Two flavors: NEW-PAIR (fresh token, top-tier pool, 5-min vol hot) and
   // DIP-SET (<=2M mcap, >=50% off high -> set at the bottom).
   function houseSignal(row, m) {
-    if (!m || !m.ok) return null;
-    var hp = m.housePool || m.pool;
     var age = tokenAgeH(row);
-    if (age != null && age < HOUSE_NEWPAIR_AGE_H && hp &&
-        num(hp.feeTierPct) >= HOUSE_NEWPAIR_MIN_TIER && num(hp.vol5m) >= HOUSE_NEWPAIR_MIN_VOL5M) {
+    var v5g = state.vol5m[lc(row.address)];
+    var hp = m && m.ok ? (m.housePool || m.pool) : null;
+    // NEW-PAIR: age + volume are board-wide facts; tier needs metrics. With
+    // metrics -> full check incl. tier; without -> only if the volume bar is met
+    // (chip still fires, deep-link falls back to token search).
+    var v5 = hp && num(hp.vol5m) > 0 ? num(hp.vol5m) : v5g;
+    if (age != null && age < HOUSE_NEWPAIR_AGE_H && v5 != null && v5 >= HOUSE_NEWPAIR_MIN_VOL5M &&
+        (!hp || num(hp.feeTierPct) >= HOUSE_NEWPAIR_MIN_TIER)) {
       return { type: "NEW-PAIR", pool: hp,
-        why: "fresh pair " + fmtNum(age, 1) + "h · top tier " + hp.feeTierPct + "% · vol5m $" + fmtCompact(hp.vol5m) };
+        why: "fresh pair " + fmtNum(age, 1) + "h · " + (hp ? "top tier " + hp.feeTierPct + "%" : "tier pending") + " · vol5m $" + fmtCompact(v5) };
     }
     if (isDipSet(row, m)) {
-      return { type: "DIP-SET", pool: m.pool,
-        why: "mcap $" + fmtCompact(row.mcap) + " · ▼" + fmtNum(num(m.ddHigh), 0) + "% from high — bottom-set zone" };
+      var dd = dipDD(row, m);
+      return { type: "DIP-SET", pool: m && m.ok ? m.pool : null,
+        why: "mcap $" + fmtCompact(row.mcap) + " · ▼" + fmtNum(dd, 0) + "% from peak — bottom-set zone" };
     }
     return null;
   }
 
+  // Board-wide dip check — uses GMGN's own history_highest_market_cap so it works
+  // on ALL rows with zero GT calls. GT-candle ddHigh refines it when metrics exist.
+  function dipDD(row, m) {
+    if (m && m.ddHigh != null) return num(m.ddHigh);
+    if (row.histMcap > 0 && row.mcap > 0) return (1 - row.mcap / row.histMcap) * 100;
+    return null;
+  }
   function isDipSet(row, m) {
-    if (!m || m.ddHigh == null) return false;
-    if (!(row.mcap > 0 && row.mcap <= HOUSE_DIP_MAX_MCAP)) return false;
-    return num(m.ddHigh) >= HOUSE_DIP_MIN_DD;
+    if (!(row.mcap >= HOUSE_DIP_MIN_MCAP && row.mcap <= HOUSE_DIP_MAX_MCAP)) return false;
+    if (!(num(row.volume) >= HOUSE_DIP_MIN_VOL1H)) return false; // still alive
+    var dd = dipDD(row, m);
+    return dd != null && dd >= HOUSE_DIP_MIN_DD && dd <= HOUSE_DIP_MAX_DD;
+  }
+
+  // Board-wide house candidates (cheap GMGN-only pre-filter over ALL rows):
+  //  - DIP-SET: mcap<=2M and >=50% off peak mcap
+  //  - NEW-PAIR: age<24h and 5m board volume (from the 5m rank feed) >= $300k
+  // Candidates get metrics fetched (for pool address/tier + chip deep-link) even
+  // when they sit outside the TOP_N volume rows.
+  var HOUSE_CAND_MAX = 4; // extra metrics fetches per cycle (GT budget guard)
+  function houseCandidates() {
+    var out = [];
+    state.rows.forEach(function (row) {
+      if (safetyFails(row).length) return;
+      var age = tokenAgeH(row);
+      var v5 = state.vol5m[lc(row.address)];
+      var newPairHot = age != null && age < HOUSE_NEWPAIR_AGE_H && v5 != null && v5 >= HOUSE_NEWPAIR_MIN_VOL5M;
+      if (isDipSet(row, null) || newPairHot) out.push(row);
+    });
+    return out.slice(0, HOUSE_CAND_MAX * 3);
   }
 
   // ========================================================================
@@ -293,7 +346,7 @@
   }
 
   var requestMetricsForTop = safe(function requestMetricsForTop() {
-    var top = topRows();
+    var top = topRows().concat(houseCandidates());
     top.forEach(function (row) {
       // skip hard-blocked tokens (don't waste GT budget on rugs)
       if (safetyFails(row).length) return;
@@ -463,16 +516,26 @@
 
   function currentSignals() {
     var full = [], near = [], house = [];
+    var seenHouse = {};
     topRows().forEach(function (row) {
       var cls = classify(row);
       var hs = cls.blocked ? null : houseSignal(row, cls.m);
-      if (hs) house.push({ row: row, cls: cls, hs: hs });
+      if (hs && !seenHouse[lc(row.address)]) { seenHouse[lc(row.address)] = 1; house.push({ row: row, cls: cls, hs: hs }); }
       if (cls.kind === "FULL") full.push({ row: row, cls: cls });
       else if (cls.kind === "NEAR") near.push({ row: row, cls: cls });
     });
+    // board-wide house sweep (rows outside TOP_N)
+    houseCandidates().forEach(function (row) {
+      if (seenHouse[lc(row.address)]) return;
+      var cls = classify(row);
+      if (cls.blocked) return;
+      var hs = houseSignal(row, cls.m);
+      if (hs) { seenHouse[lc(row.address)] = 1; house.push({ row: row, cls: cls, hs: hs }); }
+    });
     full.sort(function (a, b) { return (b.cls.edge || 0) - (a.cls.edge || 0); });
     near.sort(function (a, b) { return (b.cls.edge || 0) - (a.cls.edge || 0); });
-    house.sort(function (a, b) { return (b.cls.edge || 0) - (a.cls.edge || 0); });
+    house.sort(function (a, b) { return (num(b.row.volume)) - (num(a.row.volume)); });
+    house = house.slice(0, HOUSE_CHIP_CAP);
     return { full: full, near: near, house: house };
   }
 
@@ -662,8 +725,9 @@
   function startPolling() {
     stopPolling();
     fetchRank();
+    fetch5m();
     state.pollTimer = setInterval(safe(function () {
-      if (document.visibilityState === "visible") fetchRank();
+      if (document.visibilityState === "visible") { fetchRank(); fetch5m(); }
     }), POLL_MS);
   }
   function stopPolling() {
