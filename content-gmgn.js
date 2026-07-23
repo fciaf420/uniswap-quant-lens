@@ -287,22 +287,23 @@
     var age = tokenAgeH(row);
     var v5g = state.vol5m[lc(row.address)];
     var hp = m && m.ok ? m.housePool : null; // sane-tier (1-10%) pool only, null if none
-    // Metrics loaded but NO pool in the sane fee band (1-10%) -> nothing to play.
-    if (m && m.ok && !hp) return null;
+    // NO chip until the pool tier is VERIFIED. "tier pending" chips were clickable
+    // landmines (live case: Syrax chip routed to its only pool — a 0.01%). Candidates
+    // get metrics within 1-2 cycles, so verified chips appear shortly after.
+    if (!hp) return null;
     // NEW-PAIR: age + volume are board-wide facts; tier needs metrics. With
     // metrics -> full check incl. tier; without -> only if the volume bar is met
     // (chip still fires, deep-link falls back to token search).
-    var v5 = hp && num(hp.vol5m) > 0 ? num(hp.vol5m) : v5g;
+    var v5 = num(hp.vol5m) > 0 ? num(hp.vol5m) : v5g;
     if (age != null && age < HOUSE_NEWPAIR_AGE_H && v5 != null && v5 >= HOUSE_NEWPAIR_MIN_VOL5M &&
-        (!hp || num(hp.feeTierPct) >= HOUSE_NEWPAIR_MIN_TIER)) {
+        num(hp.feeTierPct) >= HOUSE_NEWPAIR_MIN_TIER) {
       return { type: "NEW-PAIR", pool: hp,
-        why: "fresh pair " + fmtNum(age, 1) + "h · " + (hp ? "top tier " + hp.feeTierPct + "%" : "tier pending") + " · vol5m $" + fmtCompact(v5) };
+        why: "fresh pair " + fmtNum(age, 1) + "h · top tier " + hp.feeTierPct + "% · vol5m $" + fmtCompact(v5) };
     }
     if (isDipSet(row, m)) {
       var dd = dipDD(row, m);
       return { type: "DIP-SET", pool: hp,
-        why: "mcap $" + fmtCompact(row.mcap) + " · ▼" + fmtNum(dd, 0) + "% from peak — bottom-set zone" +
-             (hp ? " · " + hp.feeTierPct + "% pool" : " · tier pending") };
+        why: "mcap $" + fmtCompact(row.mcap) + " · ▼" + fmtNum(dd, 0) + "% from peak — bottom-set zone · " + hp.feeTierPct + "% pool" };
     }
     return null;
   }
