@@ -297,11 +297,14 @@
         why: "fresh pair " + fmtNum(age, 1) + "h · " + (hp ? "top tier " + hp.feeTierPct + "%" : "tier pending") + " · vol5m $" + fmtCompact(v5) };
     }
     if (isDipSet(row, m)) {
+      // Playbook: only play the top-fee pool. If metrics are loaded and the BEST
+      // pool this token has is under 1%, there is no house trade — no signal at all
+      // (a 0.01% tier can't pay for memecoin vol; caught live on Syrax 2026-07-22).
+      if (hp && num(hp.feeTierPct) < HOUSE_NEWPAIR_MIN_TIER) return null;
       var dd = dipDD(row, m);
-      // Target the HIGHEST-FEE-TIER pool (house playbook: always play the top-fee
-      // pool — 1% on robinhood today, auto-prefers higher tiers if they appear).
       return { type: "DIP-SET", pool: hp || (m && m.ok ? m.pool : null),
-        why: "mcap $" + fmtCompact(row.mcap) + " · ▼" + fmtNum(dd, 0) + "% from peak — bottom-set zone" };
+        why: "mcap $" + fmtCompact(row.mcap) + " · ▼" + fmtNum(dd, 0) + "% from peak — bottom-set zone" +
+             (hp ? " · " + hp.feeTierPct + "% pool" : " · tier pending") };
     }
     return null;
   }
